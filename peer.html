@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peer2 - Подключение к сессии</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        video { width: 300px; margin: 10px; border: 2px solid #2196F3; border-radius: 5px; }
+        button { margin: 5px; padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .connected { background: #d4edda; color: #155724; }
+        .waiting { background: #fff3cd; color: #856404; }
+        .error { background: #f8d7da; color: #721c24; }
+        .connection-form { margin: 20px 0; }
+        .connection-form input {
+            padding: 10px;
+            width: 300px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .ice-info { background: #e8f4fd; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px; }
+        .media-status { display: inline-block; padding: 5px 10px; margin: 5px; border-radius: 3px; font-size: 14px; }
+        .media-on { background: #4CAF50; color: white; }
+        .media-off { background: #f44336; color: white; }
+        .video-container { display: flex; flex-wrap: wrap; gap: 20px; }
+        .controls { margin: 20px 0; }
+        .control-group { margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <h1>📡 Peer2 - Подключение к сессии</h1>
+    
+    <div id="status" class="status waiting">
+        ⏳ Вставьте ссылку от Peer1 или используйте автоопределение
+    </div>
+    
+    <div class="connection-form">
+        <input type="text" id="sessionLink" placeholder="Вставьте ссылку от Peer1" value="peer1.html">
+        <button onclick="connectFromLink()">🔗 Подключиться по ссылке</button>
+        <button onclick="autoConnect()" style="background:#4CAF50;color:white;">🔄 Автоподключение</button>
+    </div>
+    
+    <div id="connectionDetails" style="display:none;">
+        <h3>⚙️ Информация о соединении:</h3>
+        <div class="ice-info" id="iceInfo">
+            Ожидание подключения...
+        </div>
+    </div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <button id="toggleCamera" onclick="toggleCamera()" disabled>📷 Включить камеру</button>
+            <button id="toggleMic" onclick="toggleMic()" disabled>🎤 Включить микрофон</button>
+        </div>
+        
+        <div class="control-group">
+            <button id="shareScreen" onclick="shareScreen()" disabled>🖥️ Транслировать экран</button>
+            <button id="stopScreen" onclick="stopScreen()" disabled style="display:none;">⏹️ Остановить трансляцию</button>
+        </div>
+    </div>
+    
+    <div id="mediaStatus">
+        <span id="cameraStatus" class="media-status media-off">Камера: Выкл</span>
+        <span id="micStatus" class="media-status media-off">Микрофон: Выкл</span>
+    </div>
+    
+    <div class="video-container">
+        <div>
+            <h3>📹 Ваше видео:</h3>
+            <video id="localVideo" autoplay muted playsinline></video>
+        </div>
+        <div>
+            <h3>📹 Видео Peer1:</h3>
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+    </div>
+    
+    <script>
+        let peerConnection = null;
+        let dataChannel = null;
+        let localStream = null;
+        let screenStream = null;
+        let sessionData = null;
+        let cameraEnabled = false;
+        let micEnabled = false;
+        
+        const config = {
+            iceServers: [
+                { urls: 'stun:stun.sipnet.ru:3478' },
+                { urls: 'stun:stun.sipnet.ru:3479' },
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
+            ],
+            iceCandidatePoolSize: 10,
+            iceTransportPolicy: 'all',
+            rtcpMuxPolicy: 'require',
+            bundlePolicy: 'max-bundle'
+        };
+        
+        function autoConnect() {
+            const keys = Object.keys(localStorage);
+            const sessionKey = keys.find(key => key.startsWith('webrtc_session_'));
+            
+            if (sessionKey) {
+                try {
+                    sessionData = JSON.parse(localStorage.getItem(sessionKey));
+                    console.log("Данные сессии найдены в localStorage");
+                    connectToSession();
+                    return;
+                } catch (error) {
+                    console.error("Ошибка парсинга данных:", error);
+                }
+            }
+            
+            const hash = window.location.hash.substring(1);
+            if (hash) {
+                try {
+                    const decodedData = decodeURIComponent(atob(hash));
+                    sessionData = JSON.parse(decodedData);
+                    console.log("Данные сессии получены из URL hash");
+                    connectToSession();
+                    return;
+                } catch (error) {
+                    console.error("Ошибка декодирования hash:", error);
+                }
+            }
+            
+            updateStatus("❌ Данные сессии не найдены", "error");
+        }
+        
+        function connectFromLink() {
+            const link = document.getElementById('sessionLink').value.trim();
+            
+            if (!link) {
+                alert('Введите ссылку от Peer1');
+                return;
+            }
+            
+            if (link === 'peer1.html') {
+                autoConnect();
+                return;
+            }
+            
+            try {
+                let hash = '';
+                if (link.includes('#')) {
+                    hash = link.split('#')[1];
+                }
+                
+                if (!hash) {
+                    throw new Error('Ссылка не содержит данных сессии');
+                }
+                
+                const decodedData = decodeURIComponent(atob(hash));
+                sessionData = JSON.parse(decodedData);
+                connectToSession();
+                
+            } catch (error) {
+                console.error("Ошибка обработки ссылки:", error);
+                updateStatus("❌ Неверный формат ссылки", "error");
+            }
+        }
+        
+        async function connectToSession() {
+            if (!sessionData || !sessionData.offer) {
+                updateStatus("❌ Данные сессии не найдены", "error");
+                return;
+            }
+            
+            try {
+                updateStatus("🔍 Подключаемся к сессии...", "waiting");
+                document.getElementById('connectionDetails').style.display = 'block';
+                
+                const peerConfig = sessionData.config || config;
+                peerConnection = new RTCPeerConnection(peerConfig);
+                
+                peerConnection.oniceconnectionstatechange = () => {
+                    const state = peerConnection.iceConnectionState;
+                    updateICEInfo("ICE состояние: " + state);
+                    
+                    if (state === 'connected' || state === 'completed') {
+                        updateStatus("✅ P2P соединение установлено!", "connected");
+                    } else if (state === 'failed') {
+                        updateStatus("❌ Не удалось установить соединение", "error");
+                        setTimeout(() => {
+                            if (peerConnection.iceConnectionState === 'failed') {
+                                peerConnection.restartIce();
+                            }
+                        }, 2000);
+                    }
+                };
+                
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        updateICEInfo("ICE кандидат получен");
+                        
+                        if (dataChannel && dataChannel.readyState === 'open') {
+                            dataChannel.send(JSON.stringify({
+                                type: 'ice_candidate',
+                                candidate: event.candidate
+                            }));
+                        }
+                    }
+                };
+                
+                peerConnection.ondatachannel = (event) => {
+                    dataChannel = event.channel;
+                    setupDataChannel();
+                };
+                
+                peerConnection.ontrack = (event) => {
+                    console.log("Получен удалённый поток:", event.track.kind);
+                    if (!document.getElementById('remoteVideo').srcObject) {
+                        document.getElementById('remoteVideo').srcObject = event.streams[0];
+                        updateStatus("✅ Подключено! Получен поток от Peer1", "connected");
+                    }
+                };
+                
+                await peerConnection.setRemoteDescription(
+                    new RTCSessionDescription(sessionData.offer)
+                );
+                
+                const answer = await peerConnection.createAnswer({
+                    voiceActivityDetection: false
+                });
+                
+                await peerConnection.setLocalDescription(answer);
+                
+                if (sessionData.candidates && sessionData.candidates.length > 0) {
+                    for (const candData of sessionData.candidates) {
+                        try {
+                            const candidate = new RTCIceCandidate({
+                                candidate: candData.candidate,
+                                sdpMid: candData.sdpMid,
+                                sdpMLineIndex: candData.sdpMLineIndex
+                            });
+                            await peerConnection.addIceCandidate(candidate);
+                        } catch (e) {
+                            console.warn("Ошибка добавления ICE кандидата:", e);
+                        }
+                    }
+                }
+                
+                document.getElementById('toggleCamera').disabled = false;
+                document.getElementById('toggleMic').disabled = false;
+                document.getElementById('shareScreen').disabled = false;
+                
+                updateICEInfo("✅ Ожидание установления ICE соединения...");
+                
+            } catch (error) {
+                console.error("Ошибка подключения:", error);
+                updateStatus("❌ Ошибка подключения: " + error.message, "error");
+            }
+        }
+        
+        function setupDataChannel() {
+            dataChannel.onopen = () => {
+                updateStatus("📡 Сигнальный канал установлен", "connected");
+                
+                if (peerConnection.localDescription) {
+                    dataChannel.send(JSON.stringify({
+                        type: 'answer',
+                        answer: peerConnection.localDescription
+                    }));
+                }
+            };
+            
+            dataChannel.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    handleSignalingMessage(message);
+                } catch (e) {
+                    console.log("Сообщение:", event.data);
+                }
+            };
+        }
+        
+        function handleSignalingMessage(message) {
+            switch (message.type) {
+                case 'ice_candidate':
+                    if (peerConnection && peerConnection.remoteDescription) {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate))
+                            .catch(e => console.warn("Ошибка добавления ICE кандидата:", e));
+                    }
+                    break;
+            }
+        }
+        
+        async function toggleCamera() {
+            try {
+                if (!cameraEnabled) {
+                    if (!localStream) {
+                        localStream = await navigator.mediaDevices.getUserMedia({
+                            video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+                            audio: false
+                        });
+                    }
+                    
+                    const videoTrack = localStream.getVideoTracks()[0];
+                    if (videoTrack) {
+                        videoTrack.enabled = true;
+                        cameraEnabled = true;
+                        document.getElementById('localVideo').srcObject = localStream;
+                        document.getElementById('toggleCamera').innerHTML = '📷 Выключить камеру';
+                        document.getElementById('cameraStatus').className = 'media-status media-on';
+                        document.getElementById('cameraStatus').textContent = 'Камера: Вкл';
+                        
+                        if (peerConnection) {
+                            peerConnection.getSenders().forEach(sender => {
+                                if (sender.track && sender.track.kind === 'video') {
+                                    sender.replaceTrack(videoTrack);
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    const videoTrack = localStream?.getVideoTracks()[0];
+                    if (videoTrack) {
+                        videoTrack.enabled = false;
+                        cameraEnabled = false;
+                        document.getElementById('toggleCamera').innerHTML = '📷 Включить камеру';
+                        document.getElementById('cameraStatus').className = 'media-status media-off';
+                        document.getElementById('cameraStatus').textContent = 'Камера: Выкл';
+                    }
+                }
+            } catch (error) {
+                console.error("Ошибка переключения камеры:", error);
+            }
+        }
+        
+        async function toggleMic() {
+            try {
+                if (!micEnabled) {
+                    if (!localStream) {
+                        localStream = await navigator.mediaDevices.getUserMedia({
+                            video: false,
+                            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                        });
+                    }
+                    
+                    const audioTrack = localStream.getAudioTracks()[0];
+                    if (audioTrack) {
+                        audioTrack.enabled = true;
+                        micEnabled = true;
+                        document.getElementById('toggleMic').innerHTML = '🎤 Выключить микрофон';
+                        document.getElementById('micStatus').className = 'media-status media-on';
+                        document.getElementById('micStatus').textContent = 'Микрофон: Вкл';
+                        
+                        if (peerConnection) {
+                            peerConnection.getSenders().forEach(sender => {
+                                if (sender.track && sender.track.kind === 'audio') {
+                                    sender.replaceTrack(audioTrack);
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    const audioTrack = localStream?.getAudioTracks()[0];
+                    if (audioTrack) {
+                        audioTrack.enabled = false;
+                        micEnabled = false;
+                        document.getElementById('toggleMic').innerHTML = '🎤 Включить микрофон';
+                        document.getElementById('micStatus').className = 'media-status media-off';
+                        document.getElementById('micStatus').textContent = 'Микрофон: Выкл';
+                    }
+                }
+            } catch (error) {
+                console.error("Ошибка переключения микрофона:", error);
+            }
+        }
+        
+        async function shareScreen() {
+            try {
+                screenStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { cursor: "always" },
+                    audio: true
+                });
+                
+                document.getElementById('localVideo').srcObject = screenStream;
+                
+                screenStream.getVideoTracks()[0].onended = () => {
+                    stopScreen();
+                };
+                
+                screenStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, screenStream);
+                });
+                
+                document.getElementById('shareScreen').style.display = 'none';
+                document.getElementById('stopScreen').style.display = 'inline-block';
+                document.getElementById('stopScreen').disabled = false;
+                
+                updateStatus("🖥️ Трансляция экрана начата", "
