@@ -69,13 +69,15 @@ https://localhost:8443
 
 ```
 p2p-learning/
-├── main.go              # Сервер на Golang (сигналинг WebSocket)
-├── static/              # Статические файлы (HTML, CSS, JS)
-│   └── index.html       # Клиентское приложение
-├── certs/               # SSL сертификаты
-│   ├── cert.pem
-│   └── key.pem
-└── README.md            # Документация
+├── Dockerfile
+├── docker-compose.yml
+├── main.go
+├── go.mod
+├── static/
+│   └── index.html
+└── certs/
+    ├── cert.pem
+    └── key.pem
 ```
 
 ## 🔧 Конфигурация
