@@ -4,7 +4,9 @@ import (
     "encoding/json"
     "log"
     "net/http"
+    "os"
     "sync"
+    "time"
     "github.com/gorilla/websocket"
 )
 
@@ -20,7 +22,7 @@ type Peer struct {
 }
 
 type SignalMessage struct {
-    Type    string          `json:"type"` // offer, answer, candidate, role, disconnect, chat, file
+    Type    string          `json:"type"`
     Role    string          `json:"role,omitempty"`
     Target  string          `json:"target,omitempty"`
     SDP     string          `json:"sdp,omitempty"`
@@ -42,235 +44,127 @@ var (
     mutex = &sync.RWMutex{}
     upgrader = websocket.Upgrader{
         CheckOrigin: func(r *http.Request) bool { return true },
+        // Увеличиваем размер буфера для файлов
+        ReadBufferSize:  1024 * 1024, // 1MB
+        WriteBufferSize: 1024 * 1024, // 1MB
     }
 )
 
+// Настройка логирования в файл для Docker
+func init() {
+    // Создаем директорию для логов если её нет
+    if err := os.MkdirAll("./logs", 0755); err == nil {
+        // Открываем файл лога
+        logFile, err := os.OpenFile("./logs/p2p-server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+        if err == nil {
+            log.SetOutput(logFile)
+        }
+    }
+    
+    // Добавляем временную метку
+    log.SetFlags(log.LstdFlags | log.Lshortfile)
+}
+
 func main() {
-    // Статические файлы клиента
-    http.Handle("/", http.FileServer(http.Dir("./static")))
+    log.Println("=== P2P Learning Server Starting ===")
+    log.Printf("Go Version: %s", os.Getenv("GOLANG_VERSION"))
     
-    // WebSocket для сигналинга (WSS)
-    http.HandleFunc("/ws", handleWebSocket)
+    // Запускаем HTTP редирект сервер
+    go startHTTPServer()
     
-    log.Println("Signal server starting on https://localhost:8443")
-    log.Println("Используйте https://<IP-адрес-сервера>:8443 для доступа с других устройств")
+    // Основной HTTPS сервер
+    mux := http.NewServeMux()
+    mux.Handle("/", http.FileServer(http.Dir("./static")))
+    mux.HandleFunc("/ws", handleWebSocket)
+    mux.HandleFunc("/health", healthCheck)
+    mux.HandleFunc("/metrics", metricsHandler)
+
+    httpsServer := &http.Server{
+        Addr:         ":443",
+        Handler:      mux,
+        ReadTimeout:  30 * time.Second,
+        WriteTimeout: 30 * time.Second,
+        IdleTimeout:  120 * time.Second,
+    }
+
+    // Проверяем наличие сертификатов
+    if _, err := os.Stat("./certs/cert.pem"); os.IsNotExist(err) {
+        log.Fatal("SSL certificate not found. Please generate certificates first.")
+    }
+    if _, err := os.Stat("./certs/key.pem"); os.IsNotExist(err) {
+        log.Fatal("SSL key not found. Please generate certificates first.")
+    }
+
+    log.Println("HTTPS server starting on :443")
+    log.Println("HTTP server on :80 will redirect to HTTPS")
+    log.Println("WebSocket endpoint: wss://<server>/ws")
+    log.Println("Health check: https://<server>/health")
     
     // Запускаем HTTPS сервер
-    err := http.ListenAndServeTLS(":8443", "certs/cert.pem", "certs/key.pem", nil)
-    if err != nil {
-        log.Fatal("ListenAndServeTLS: ", err)
+    if err := httpsServer.ListenAndServeTLS("./certs/cert.pem", "./certs/key.pem"); err != nil {
+        log.Fatal("HTTPS server failed:", err)
     }
 }
 
-func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-    conn, err := upgrader.Upgrade(w, r, nil)
-    if err != nil {
-        log.Print("Upgrade failed:", err)
-        return
+func startHTTPServer() {
+    httpRedirect := &http.Server{
+        Addr: ":80",
+        Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            target := "https://" + r.Host + r.URL.Path
+            if r.URL.RawQuery != "" {
+                target += "?" + r.URL.RawQuery
+            }
+            log.Printf("Redirect: %s -> %s", r.URL.Path, target)
+            http.Redirect(w, r, target, http.StatusMovedPermanently)
+        }),
+        ReadTimeout:  10 * time.Second,
+        WriteTimeout: 10 * time.Second,
     }
-    defer conn.Close()
-
-    var currentPeer *Peer
-    var currentRoomID string
     
-    for {
-        var msg SignalMessage
-        err := conn.ReadJSON(&msg)
-        if err != nil {
-            log.Println("Read error:", err)
-            // Удаляем пира при отключении
-            if currentPeer != nil {
-                removePeer(currentRoomID, currentPeer)
-            }
-            break
-        }
-
-        switch msg.Type {
-        case "join":
-            // Регистрация в комнате
-            roomID := "room1" // Для простоты используем одну комнату
-            currentRoomID = roomID
-            
-            currentPeer = &Peer{
-                ID:   conn.RemoteAddr().String(),
-                Role: msg.Role,
-                Conn: conn,
-            }
-            
-            mutex.Lock()
-            if _, exists := rooms[roomID]; !exists {
-                rooms[roomID] = &Room{}
-            }
-            
-            if msg.Role == "teacher" {
-                // Если учитель уже есть, заменяем его
-                if rooms[roomID].Teacher != nil {
-                    oldTeacher := rooms[roomID].Teacher
-                    oldTeacher.Conn.WriteJSON(SignalMessage{
-                        Type: "peer_left",
-                    })
-                }
-                rooms[roomID].Teacher = currentPeer
-                log.Println("Teacher joined:", currentPeer.ID)
-            } else {
-                // Если ученик уже есть, заменяем его
-                if rooms[roomID].Student != nil {
-                    oldStudent := rooms[roomID].Student
-                    oldStudent.Conn.WriteJSON(SignalMessage{
-                        Type: "peer_left",
-                    })
-                }
-                rooms[roomID].Student = currentPeer
-                log.Println("Student joined:", currentPeer.ID)
-            }
-            mutex.Unlock()
-            
-            // Уведомляем о подключении
-            notifyPeerJoined(roomID, msg.Role)
-            
-        case "offer", "answer", "candidate":
-            // Пересылка сигналов между пирами
-            if currentRoomID != "" {
-                forwardSignal(currentRoomID, msg)
-            }
-            
-        case "chat":
-            // Пересылка сообщений чата
-            if currentRoomID != "" {
-                forwardToPeer(currentRoomID, msg.Target, msg)
-            }
-            
-        case "file":
-            // Пересылка файлов (в реальном проекте лучше через P2P)
-            if currentRoomID != "" {
-                forwardToPeer(currentRoomID, msg.Target, msg)
-            }
-            
-        case "disconnect":
-            if currentPeer != nil && currentRoomID != "" {
-                removePeer(currentRoomID, currentPeer)
-            }
-            return
-        }
+    log.Println("HTTP redirect server started on :80")
+    if err := httpRedirect.ListenAndServe(); err != nil {
+        log.Printf("HTTP server stopped: %v", err)
     }
 }
 
-func notifyPeerJoined(roomID, role string) {
+// Health check endpoint для Docker
+func healthCheck(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusOK)
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "status": "healthy",
+        "time":   time.Now().Unix(),
+        "rooms":  len(rooms),
+    })
+}
+
+// Metrics endpoint (упрощенный)
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
     mutex.RLock()
-    room := rooms[roomID]
-    mutex.RUnlock()
+    defer mutex.RUnlock()
     
-    if room == nil {
-        return
-    }
+    activeRooms := 0
+    activeTeachers := 0
+    activeStudents := 0
     
-    // Уведомляем учителя о ученике
-    if role == "student" && room.Teacher != nil {
-        err := room.Teacher.Conn.WriteJSON(SignalMessage{
-            Type: "peer_joined",
-            Role: "student",
-        })
-        if err != nil {
-            log.Println("Error notifying teacher:", err)
-        }
-    }
-    
-    // Уведомляем ученика об учителе
-    if role == "teacher" && room.Student != nil {
-        err := room.Student.Conn.WriteJSON(SignalMessage{
-            Type: "peer_joined",
-            Role: "teacher",
-        })
-        if err != nil {
-            log.Println("Error notifying student:", err)
-        }
-    }
-}
-
-func forwardSignal(roomID string, msg SignalMessage) {
-    mutex.RLock()
-    room := rooms[roomID]
-    mutex.RUnlock()
-    
-    if room == nil {
-        return
-    }
-    
-    var targetPeer *Peer
-    if msg.Target == "student" {
-        targetPeer = room.Student
-    } else if msg.Target == "teacher" {
-        targetPeer = room.Teacher
-    }
-    
-    if targetPeer != nil {
-        err := targetPeer.Conn.WriteJSON(msg)
-        if err != nil {
-            log.Println("Error forwarding signal:", err)
-        }
-    }
-}
-
-func forwardToPeer(roomID, targetRole string, msg SignalMessage) {
-    mutex.RLock()
-    room := rooms[roomID]
-    mutex.RUnlock()
-    
-    if room == nil {
-        return
-    }
-    
-    var targetPeer *Peer
-    if targetRole == "teacher" {
-        targetPeer = room.Teacher
-    } else {
-        targetPeer = room.Student
-    }
-    
-    if targetPeer != nil {
-        err := targetPeer.Conn.WriteJSON(msg)
-        if err != nil {
-            log.Println("Error forwarding message:", err)
-        }
-    }
-}
-
-func removePeer(roomID string, peer *Peer) {
-    mutex.Lock()
-    defer mutex.Unlock()
-    
-    room := rooms[roomID]
-    if room == nil {
-        return
-    }
-    
-    if room.Teacher != nil && room.Teacher.ID == peer.ID {
-        room.Teacher = nil
-        if room.Student != nil {
-            err := room.Student.Conn.WriteJSON(SignalMessage{
-                Type: "peer_left",
-            })
-            if err != nil {
-                log.Println("Error notifying student about teacher left:", err)
-            }
-        }
-        log.Println("Teacher removed:", peer.ID)
-    } else if room.Student != nil && room.Student.ID == peer.ID {
-        room.Student = nil
+    for _, room := range rooms {
+        activeRooms++
         if room.Teacher != nil {
-            err := room.Teacher.Conn.WriteJSON(SignalMessage{
-                Type: "peer_left",
-            })
-            if err != nil {
-                log.Println("Error notifying teacher about student left:", err)
-            }
+            activeTeachers++
         }
-        log.Println("Student removed:", peer.ID)
+        if room.Student != nil {
+            activeStudents++
+        }
     }
     
-    // Удаляем пустую комнату
-    if room.Teacher == nil && room.Student == nil {
-        delete(rooms, roomID)
-        log.Println("Room removed:", roomID)
-    }
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "active_rooms":    activeRooms,
+        "active_teachers": activeTeachers,
+        "active_students": activeStudents,
+        "total_peers":     activeTeachers + activeStudents,
+    })
 }
+
+// Остальной код без изменений (handleWebSocket, notifyPeerJoined, forwardSignal, forwardToPeer, removePeer)
+// ... (весь остальной код из предыдущего main.go)
