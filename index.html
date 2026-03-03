@@ -1,0 +1,1717 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Обучение на Pion WebRTC</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+        .container { max-width: 1400px; width: 100%; margin: 20px; background: white; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; display: flex; flex-direction: column; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; }
+        
+        .role-selector { display: flex; justify-content: center; gap: 20px; padding: 20px; background: #f5f5f5; flex-wrap: wrap; }
+        .role-btn { padding: 12px 30px; font-size: 18px; border: none; border-radius: 10px; cursor: pointer; transition: all 0.3s; }
+        .role-btn.teacher { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .role-btn.student { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; }
+        .role-btn.exit { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; }
+        .role-btn.selected { transform: scale(1.1); box-shadow: 0 5px 20px rgba(0,0,0,0.3); }
+        .role-btn.hidden { display: none; }
+        
+        .status-bar { 
+            background: #f0f0f0; 
+            padding: 12px 20px; 
+            font-size: 13px; 
+            display: flex; 
+            gap: 25px; 
+            flex-wrap: wrap;
+            border-bottom: 1px solid #ddd;
+        }
+        .status-item { display: flex; align-items: center; gap: 8px; }
+        .status-indicator { width: 12px; height: 12px; border-radius: 50%; }
+        .status-connected { background-color: #4CAF50; box-shadow: 0 0 8px #4CAF50; animation: pulse 2s infinite; }
+        .status-disconnected { background-color: #f44336; }
+        .status-warning { background-color: #ff9800; }
+        
+        .main-content { 
+            display: flex; 
+            padding: 20px; 
+            gap: 20px; 
+            min-height: 600px;
+        }
+        
+        .video-section { 
+            flex: 3; 
+            min-width: 300px; 
+            transition: all 0.3s ease;
+        }
+        
+        .controls-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            background: #f5f5f5;
+            padding: 10px 15px;
+            border-radius: 10px;
+        }
+        
+        .my-devices {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .video-grid { 
+            display: flex;
+            flex-direction: column;
+            gap: 15px; 
+        }
+        
+        .video-container { 
+            position: relative; 
+            background: #1a1a1a; 
+            border-radius: 12px; 
+            overflow: hidden; 
+            aspect-ratio: 16/9; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            border: 2px solid rgba(255,255,255,0.1);
+        }
+        
+        .video-container.remote {
+            width: 100%;
+        }
+        
+        .video-container.local {
+            width: 50%;
+            align-self: flex-end;
+            border: 2px solid rgba(102, 126, 234, 0.5);
+        }
+        
+        .video-container video { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: cover; 
+        }
+        
+        .device-overlay { 
+            position: absolute; 
+            bottom: 10px; 
+            right: 10px; 
+            display: flex; 
+            gap: 8px; 
+            background: rgba(0,0,0,0.4); 
+            padding: 6px 12px; 
+            border-radius: 20px; 
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255,255,255,0.2);
+            z-index: 10;
+        }
+        
+        .device-icon {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: white;
+            font-size: 14px;
+        }
+        
+        .status-led { 
+            width: 8px; 
+            height: 8px; 
+            border-radius: 50%; 
+            display: inline-block;
+            transition: all 0.3s;
+        }
+        
+        .status-led.on { 
+            background-color: #4CAF50; 
+            box-shadow: 0 0 10px #4CAF50;
+        }
+        
+        .status-led.off { 
+            background-color: #f44336;
+            box-shadow: 0 0 10px #f44336;
+        }
+        
+        .controls { 
+            display: flex; 
+            gap: 10px; 
+            margin-top: 15px; 
+            flex-wrap: wrap; 
+        }
+        
+        .control-btn { 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 25px; 
+            cursor: pointer; 
+            font-size: 14px; 
+            font-weight: 600;
+            transition: all 0.3s; 
+            display: flex; 
+            align-items: center; 
+            gap: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        .control-btn.teacher { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .control-btn.student { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; }
+        .control-btn.danger { background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; }
+        .control-btn.warning { background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white; }
+        .control-btn.success { background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%); color: white; }
+        .control-btn:active { transform: scale(0.95); }
+        .control-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .control-btn .btn-status { 
+            width: 10px; 
+            height: 10px; 
+            border-radius: 50%; 
+            display: inline-block;
+            margin-left: 5px;
+        }
+        
+        .attention-banner {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            animation: pulse 1.5s infinite;
+            box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+        }
+        .attention-banner.show {
+            display: flex;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.9; transform: scale(1.02); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        
+        /* Чат - вертикальная полоса при сворачивании */
+        .chat-section { 
+            width: 300px;
+            background: #f5f5f5; 
+            border-radius: 15px; 
+            display: flex; 
+            flex-direction: column; 
+            transition: all 0.3s ease;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        
+        .chat-section.collapsed {
+            width: 50px;
+            min-width: 50px;
+        }
+        
+        .chat-section.collapsed .chat-content,
+        .chat-section.collapsed .chat-header h3 span:not(.chat-toggle) {
+            display: none;
+        }
+        
+        .chat-section.collapsed .chat-header {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            height: 100%;
+            padding: 15px 5px;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .chat-section.collapsed .chat-header h3 {
+            margin: 0;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .chat-section.collapsed .chat-toggle {
+            margin: 0;
+            transform: rotate(90deg);
+        }
+        
+        .chat-header {
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px 15px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .chat-header h3 {
+            margin: 0;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .chat-toggle {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.3s;
+        }
+        
+        .chat-toggle:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .chat-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            overflow: hidden;
+        }
+        
+        .chat-messages { 
+            flex: 1; 
+            overflow-y: auto; 
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .message { 
+            margin-bottom: 10px; 
+            padding: 10px 15px; 
+            border-radius: 18px; 
+            max-width: 85%; 
+            word-wrap: break-word; 
+        }
+        
+        .message.teacher { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            align-self: flex-start; 
+        }
+        
+        .message.student { 
+            background: white; 
+            align-self: flex-end; 
+            margin-left: auto; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+        }
+        
+        .message.system { 
+            background: #e0e0e0; 
+            text-align: center; 
+            font-style: italic; 
+            width: 100%; 
+            font-size: 12px;
+            color: #333;
+        }
+        
+        .message.waiting {
+            background: #fff3e0;
+            color: #f57c00;
+            text-align: center;
+            width: 100%;
+            font-weight: 600;
+            border-left: 4px solid #f57c00;
+        }
+        
+        .message.attention {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            color: white;
+            text-align: center;
+            width: 100%;
+            font-weight: 700;
+            font-size: 16px;
+            animation: attentionPulse 1s infinite;
+            border: 2px solid white;
+        }
+        
+        @keyframes attentionPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .chat-input { display: flex; gap: 10px; }
+        .chat-input input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 25px; font-size: 14px; }
+        .chat-input button { 
+            padding: 12px 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            color: white; 
+            border: none; 
+            border-radius: 25px; 
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .file-attach { margin-top: 10px; }
+        .file-item { 
+            background: white; 
+            padding: 10px; 
+            border-radius: 10px; 
+            margin-bottom: 8px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .debug-section {
+            margin-top: 15px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .debug-header {
+            background: #f0f0f0;
+            padding: 10px 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            color: #666;
+        }
+        .debug-header:hover {
+            background: #e0e0e0;
+        }
+        .debug-content { 
+            font-family: monospace; 
+            font-size: 11px; 
+            color: #666; 
+            background: #f5f5f5; 
+            padding: 10px; 
+            max-height: 120px; 
+            overflow-y: auto;
+            display: none;
+        }
+        .debug-content.show {
+            display: block;
+        }
+        .debug-toggle {
+            font-size: 18px;
+            transition: transform 0.3s;
+        }
+        .debug-toggle.rotated {
+            transform: rotate(90deg);
+        }
+        
+        .waiting-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .waiting-indicator .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎓 P2P Обучение на Pion WebRTC</h1>
+            <p>Прямое соединение между учителем и учеником</p>
+        </div>
+        
+        <div class="status-bar" id="statusBar">
+            <div class="status-item">
+                <span class="status-indicator status-disconnected" id="wsIndicator"></span>
+                <span>Сервер: <span id="wsStatus">отключен</span></span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-disconnected" id="p2pIndicator"></span>
+                <span>P2P: <span id="p2pStatus">отключено</span></span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-disconnected" id="mediaIndicator"></span>
+                <span>Медиа: <span id="mediaStatus">не активны</span></span>
+            </div>
+            <div class="status-item" id="roleDisplay">
+                <span>Роль: <span id="currentRole">не выбрана</span></span>
+            </div>
+        </div>
+        
+        <div class="role-selector" id="roleSelector">
+            <button class="role-btn teacher" onclick="selectRole('teacher')" id="teacherRoleBtn">👨‍🏫 Я Учитель</button>
+            <button class="role-btn student" onclick="selectRole('student')" id="studentRoleBtn">🧑‍🎓 Я Ученик</button>
+            <button class="role-btn exit hidden" onclick="exitSession()" id="exitBtn">🚪 Выйти</button>
+        </div>
+        
+        <!-- Мои устройства (под кнопкой выйти) -->
+        <div class="controls-header" id="controlsHeader" style="display: none;">
+            <div class="my-devices" id="myDevices">
+                <!-- Сюда будут добавляться кнопки устройств через JS -->
+            </div>
+            <div id="attentionPlaceholder"></div>
+        </div>
+        
+        <div class="main-content">
+            <div class="video-section">
+                <div class="attention-banner" id="attentionBanner">
+                    <span>⚠️</span>
+                    <span id="attentionMessage">Внимание! Учитель обращается к вам</span>
+                </div>
+                
+                <div class="video-grid" id="videoGrid">
+                    <!-- Удаленное видео (собеседник) - будет сверху -->
+                    <div class="video-container remote" id="remoteVideoContainer" style="display: none;">
+                        <video id="remoteVideo" autoplay playsinline></video>
+                        <div class="device-overlay" id="remoteDeviceOverlay">
+                            <span class="device-icon" title="Камера собеседника">
+                                <span>📷</span>
+                                <span class="status-led off" id="remoteCameraStatus"></span>
+                            </span>
+                            <span class="device-icon" title="Микрофон собеседника">
+                                <span>🎤</span>
+                                <span class="status-led off" id="remoteMicStatus"></span>
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <!-- Локальное видео (своё) - будет снизу -->
+                    <div class="video-container local" id="localVideoContainer">
+                        <video id="localVideo" autoplay muted playsinline></video>
+                        <div class="device-overlay" id="localDeviceOverlay">
+                            <span class="device-icon" title="Камера">
+                                <span>📷</span>
+                                <span class="status-led off" id="cameraStatus"></span>
+                            </span>
+                            <span class="device-icon" title="Микрофон">
+                                <span>🎤</span>
+                                <span class="status-led off" id="micStatus"></span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Индикатор ожидания для ученика -->
+                <div id="waitingIndicator" class="waiting-indicator" style="display: none;">
+                    <div class="spinner"></div>
+                    <div>👨‍🏫 Ожидание учителя...</div>
+                </div>
+                
+                <!-- Кнопки ошибок -->
+                <div class="controls" id="errorControls" style="display: none;">
+                    <button class="control-btn success" onclick="retryMediaAccess()">🔄 Повторить</button>
+                    <button class="control-btn warning" onclick="testMediaDevices()">🔍 Диагностика</button>
+                    <button class="control-btn warning" onclick="forceReconnect()">🔄 Переподключиться</button>
+                </div>
+                
+                <!-- Отладка под спойлером -->
+                <div class="debug-section">
+                    <div class="debug-header" onclick="toggleDebug()">
+                        <span>📋 Отладка</span>
+                        <span class="debug-toggle" id="debugToggle">▶</span>
+                    </div>
+                    <div class="debug-content" id="debugContent"></div>
+                </div>
+            </div>
+            
+            <!-- Чат (скрываемый) - по умолчанию свернут -->
+            <div class="chat-section collapsed" id="chatSection">
+                <div class="chat-header" onclick="toggleChat()">
+                    <h3>
+                        <span>💬 Чат</span>
+                    </h3>
+                    <button class="chat-toggle" id="chatToggle">≡</button>
+                </div>
+                <div class="chat-content">
+                    <div class="chat-messages" id="chatMessages"></div>
+                    <div class="chat-input">
+                        <input type="text" id="messageInput" placeholder="Введите сообщение..." onkeypress="handleKeyPress(event)" disabled>
+                        <button onclick="sendMessage()" id="sendButton" disabled>Отправить</button>
+                    </div>
+                    <div class="file-attach">
+                        <input type="file" id="fileInput" style="display: none;" onchange="sendFile(this)">
+                        <button class="control-btn teacher" onclick="document.getElementById('fileInput').click()" id="fileButton" disabled style="width: 100%;">📎 Прикрепить файл</button>
+                    </div>
+                    <div id="fileList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Конфигурация
+        const WS_PROTOCOL = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const SIGNAL_SERVER = WS_PROTOCOL + '//' + window.location.host + '/ws';
+        
+        const ICE_SERVERS = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
+            ]
+        };
+        
+        // Глобальные переменные
+        let socket;
+        let peerConnection;
+        let localStream;
+        let remoteStream;
+        let currentRole = null;
+        let dataChannel;
+        let screenStream;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 5;
+        let teacherConnected = false; // Флаг, что учитель подключен к серверу
+        let waitingForTeacher = false; // Флаг, что ученик в режиме ожидания
+        let isReconnecting = false;
+        
+        // Состояние устройств
+        let cameraEnabled = false;
+        let micEnabled = false;
+        let remoteCameraEnabled = false;
+        let remoteMicEnabled = false;
+        
+        // DOM элементы
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const remoteVideoContainer = document.getElementById('remoteVideoContainer');
+        const errorControls = document.getElementById('errorControls');
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const fileButton = document.getElementById('fileButton');
+        const debugContent = document.getElementById('debugContent');
+        const waitingIndicator = document.getElementById('waitingIndicator');
+        const attentionBanner = document.getElementById('attentionBanner');
+        const chatSection = document.getElementById('chatSection');
+        const chatToggle = document.getElementById('chatToggle');
+        const controlsHeader = document.getElementById('controlsHeader');
+        const myDevices = document.getElementById('myDevices');
+        
+        // Кнопки ролей
+        const teacherRoleBtn = document.getElementById('teacherRoleBtn');
+        const studentRoleBtn = document.getElementById('studentRoleBtn');
+        const exitBtn = document.getElementById('exitBtn');
+        
+        // Индикаторы
+        const cameraStatus = document.getElementById('cameraStatus');
+        const micStatus = document.getElementById('micStatus');
+        const remoteCameraStatus = document.getElementById('remoteCameraStatus');
+        const remoteMicStatus = document.getElementById('remoteMicStatus');
+        
+        // Статус бар
+        const wsIndicator = document.getElementById('wsIndicator');
+        const wsStatus = document.getElementById('wsStatus');
+        const p2pIndicator = document.getElementById('p2pIndicator');
+        const p2pStatus = document.getElementById('p2pStatus');
+        const mediaIndicator = document.getElementById('mediaIndicator');
+        const mediaStatus = document.getElementById('mediaStatus');
+        const currentRoleSpan = document.getElementById('currentRole');
+        
+        // Функция для добавления отладочной информации
+        function addDebug(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            console.log(`[${timestamp}] DEBUG:`, message);
+            debugContent.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            debugContent.scrollTop = debugContent.scrollHeight;
+        }
+        
+        // Переключение отладки
+        function toggleDebug() {
+            const debugContent = document.getElementById('debugContent');
+            const debugToggle = document.getElementById('debugToggle');
+            debugContent.classList.toggle('show');
+            debugToggle.classList.toggle('rotated');
+        }
+        
+        // Переключение чата
+        function toggleChat() {
+            chatSection.classList.toggle('collapsed');
+            if (chatSection.classList.contains('collapsed')) {
+                chatToggle.textContent = '≡';
+            } else {
+                chatToggle.textContent = '−';
+            }
+        }
+        
+        // Обработка нажатия Enter в чате
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+        
+        // Создание кнопок устройств с индикаторами
+        function createDeviceButtons() {
+            myDevices.innerHTML = '';
+            
+            if (currentRole === 'teacher') {
+                myDevices.innerHTML = `
+                    <button class="control-btn teacher" onclick="toggleCamera()" id="cameraBtn">
+                        <span class="btn-icon">📷</span>
+                        <span class="btn-text">Камера</span>
+                        <span class="btn-status ${cameraEnabled ? 'status-connected' : 'status-disconnected'}" id="cameraIndicator"></span>
+                    </button>
+                    <button class="control-btn teacher" onclick="toggleMicrophone()" id="micBtn">
+                        <span class="btn-icon">🎤</span>
+                        <span class="btn-text">Микрофон</span>
+                        <span class="btn-status ${micEnabled ? 'status-connected' : 'status-disconnected'}" id="micIndicator"></span>
+                    </button>
+                    <button class="control-btn teacher" onclick="toggleScreenShare()" id="screenBtn">
+                        <span class="btn-icon">🖥️</span>
+                        <span class="btn-text">Экран</span>
+                    </button>
+                    <button class="control-btn warning" onclick="sendAttention()" id="attentionBtn">
+                        <span class="btn-icon">⚠️</span>
+                        <span class="btn-text">Внимание</span>
+                    </button>
+                `;
+            } else if (currentRole === 'student') {
+                myDevices.innerHTML = `
+                    <button class="control-btn student" onclick="toggleCamera()" id="studentCameraBtn">
+                        <span class="btn-icon">📷</span>
+                        <span class="btn-text">Камера</span>
+                        <span class="btn-status ${cameraEnabled ? 'status-connected' : 'status-disconnected'}" id="studentCameraIndicator"></span>
+                    </button>
+                    <button class="control-btn student" onclick="toggleMicrophone()" id="studentMicBtn">
+                        <span class="btn-icon">🎤</span>
+                        <span class="btn-text">Микрофон</span>
+                        <span class="btn-status ${micEnabled ? 'status-connected' : 'status-disconnected'}" id="studentMicIndicator"></span>
+                    </button>
+                `;
+            }
+        }
+        
+        // Полный сброс состояния
+        function resetToRoleSelection() {
+            addDebug('🔄 Сброс к выбору роли');
+            
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            if (screenStream) {
+                screenStream.getTracks().forEach(track => track.stop());
+                screenStream = null;
+            }
+            
+            if (remoteStream) {
+                remoteStream.getTracks().forEach(track => track.stop());
+                remoteStream = null;
+            }
+            
+            currentRole = null;
+            cameraEnabled = false;
+            micEnabled = false;
+            remoteCameraEnabled = false;
+            remoteMicEnabled = false;
+            teacherConnected = false;
+            waitingForTeacher = false;
+            isReconnecting = false;
+            
+            teacherRoleBtn.classList.remove('hidden');
+            studentRoleBtn.classList.remove('hidden');
+            exitBtn.classList.add('hidden');
+            controlsHeader.style.display = 'none';
+            
+            remoteVideoContainer.style.display = 'none';
+            waitingIndicator.style.display = 'none';
+            attentionBanner.classList.remove('show');
+            
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+            
+            messageInput.disabled = true;
+            sendButton.disabled = true;
+            fileButton.disabled = true;
+            
+            currentRoleSpan.textContent = 'не выбрана';
+            
+            updateStatus();
+            addDebug('✅ Полный сброс выполнен');
+        }
+        
+        // Выход из сессии
+        function exitSession() {
+            addDebug('🚪 Выход из сессии');
+            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'disconnect'
+                }));
+            }
+            
+            resetToRoleSelection();
+        }
+        
+        // Обработка отключения собеседника
+        function handlePeerDisconnected() {
+            addDebug('👋 Собеседник отключился');
+            
+            if (currentRole === 'teacher') {
+                addChatMessage('system', '👋 Ученик отключился');
+                remoteVideoContainer.style.display = 'none';
+                teacherConnected = false;
+                
+                if (remoteStream) {
+                    remoteStream.getTracks().forEach(track => track.stop());
+                    remoteStream = new MediaStream();
+                    remoteVideo.srcObject = remoteStream;
+                }
+                
+                if (peerConnection) {
+                    peerConnection.close();
+                    peerConnection = null;
+                }
+                
+                addDebug('👨‍🏫 Учитель ожидает подключения ученика');
+            } else {
+                addChatMessage('system', '👋 Учитель отключился');
+                resetToRoleSelection();
+            }
+            
+            updateStatus();
+        }
+        
+        // Тестирование медиаустройств
+        async function testMediaDevices() {
+            addDebug('🔍 Начинаем диагностику устройств...');
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                addDebug(`Найдено устройств: ${devices.length}`);
+                
+                let hasVideo = false;
+                let hasAudio = false;
+                
+                devices.forEach(device => {
+                    const label = device.label || 'без названия (нужно разрешение)';
+                    addDebug(`- ${device.kind}: ${label}`);
+                    if (device.kind === 'videoinput') hasVideo = true;
+                    if (device.kind === 'audioinput') hasAudio = true;
+                });
+                
+                if (!hasVideo) addDebug('❌ Видеокамера не найдена!');
+                if (!hasAudio) addDebug('❌ Микрофон не найден!');
+                
+                alert(`Диагностика завершена.\nВидео: ${hasVideo ? '✅' : '❌'}\nАудио: ${hasAudio ? '✅' : '❌'}\nПодробности в панели отладки.`);
+            } catch (err) {
+                addDebug('❌ Ошибка при диагностике: ' + err.message);
+                alert('Ошибка диагностики: ' + err.message);
+            }
+        }
+        
+        // Принудительное переподключение
+        function forceReconnect() {
+            addDebug('🔄 Принудительное переподключение...');
+            if (socket) {
+                socket.close();
+            }
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            setTimeout(() => {
+                if (currentRole) {
+                    connectToSignalServer(currentRole);
+                }
+            }, 1000);
+        }
+        
+        // Выбор роли
+        function selectRole(role) {
+            currentRole = role;
+            
+            teacherRoleBtn.classList.add('hidden');
+            studentRoleBtn.classList.add('hidden');
+            exitBtn.classList.remove('hidden');
+            controlsHeader.style.display = 'block';
+            
+            currentRoleSpan.textContent = role === 'teacher' ? 'Учитель' : 'Ученик';
+            
+            createDeviceButtons();
+            
+            if (role === 'teacher') {
+                addDebug('👨‍🏫 Выбрана роль: Учитель');
+                // Учитель всегда видит себя, без ожидания
+            } else {
+                addDebug('🧑‍🎓 Выбрана роль: Ученик');
+                
+                // Проверяем, есть ли уже учитель в сессии
+                // Этот флаг будет обновлен при подключении к серверу
+                // Пока не подключились к серверу, не показываем ожидание
+            }
+            
+            connectToSignalServer(role);
+            
+            if (role === 'teacher') {
+                initWebRTC(role);
+            }
+        }
+        
+        // Подключение к сигнальному серверу
+        function connectToSignalServer(role) {
+            addDebug(`🔌 Подключение к сигнальному серверу: ${SIGNAL_SERVER}`);
+            
+            try {
+                socket = new WebSocket(SIGNAL_SERVER);
+                
+                socket.onopen = () => {
+                    addDebug('✅ Подключено к сигнальному серверу');
+                    reconnectAttempts = 0;
+                    isReconnecting = false;
+                    
+                    socket.send(JSON.stringify({
+                        type: 'join',
+                        role: role
+                    }));
+                    
+                    updateStatus();
+                };
+                
+                socket.onmessage = async (event) => {
+                    const msg = JSON.parse(event.data);
+                    addDebug(`📨 Получено: ${msg.type}`);
+                    
+                    switch(msg.type) {
+                        case 'peer_joined':
+                            if (msg.role === 'teacher' && currentRole === 'student') {
+                                teacherConnected = true;
+                                waitingForTeacher = false;
+                                waitingIndicator.style.display = 'none';
+                                addChatMessage('system', '👨‍🏫 Учитель подключился, устанавливаем соединение...');
+                                addDebug('✅ Учитель подключился, инициализация WebRTC для ученика');
+                                
+                                // Если ученик переподключается, закрываем старый peerConnection
+                                if (peerConnection) {
+                                    peerConnection.close();
+                                    peerConnection = null;
+                                }
+                                
+                                await initWebRTC('student');
+                                setTimeout(() => createOffer(), 1000);
+                            } else if (msg.role === 'student' && currentRole === 'teacher') {
+                                addChatMessage('system', '🧑‍🎓 Ученик подключился');
+                                addDebug('✅ Ученик подключился');
+                                
+                                // Если учитель уже в сессии и ученик переподключается
+                                if (!peerConnection) {
+                                    await initWebRTC('teacher');
+                                } else {
+                                    // Пересоздаем соединение
+                                    peerConnection.close();
+                                    peerConnection = null;
+                                    await initWebRTC('teacher');
+                                }
+                                setTimeout(() => createOffer(), 1000);
+                            }
+                            break;
+                            
+                        case 'peer_left':
+                            handlePeerDisconnected();
+                            break;
+                            
+                        case 'offer':
+                            addDebug('📞 Получен SDP offer');
+                            if (!peerConnection) {
+                                await initWebRTC(currentRole);
+                            }
+                            await handleOffer(msg);
+                            break;
+                            
+                        case 'answer':
+                            addDebug('📞 Получен SDP answer');
+                            await handleAnswer(msg);
+                            break;
+                            
+                        case 'candidate':
+                            addDebug('🧊 Получен ICE candidate');
+                            await handleCandidate(msg);
+                            break;
+                            
+                        case 'chat':
+                            addChatMessage(msg.role, msg.message);
+                            break;
+                            
+                        case 'file':
+                            receiveFile(msg.file);
+                            break;
+                            
+                        case 'remote_state':
+                            if (msg.camera !== undefined) {
+                                remoteCameraEnabled = msg.camera;
+                                addDebug(`📷 Состояние камеры собеседника: ${remoteCameraEnabled ? 'вкл' : 'выкл'}`);
+                            }
+                            if (msg.mic !== undefined) {
+                                remoteMicEnabled = msg.mic;
+                                addDebug(`🎤 Состояние микрофона собеседника: ${remoteMicEnabled ? 'вкл' : 'выкл'}`);
+                            }
+                            updateStatus();
+                            break;
+                            
+                        case 'teacher_command':
+                            if (currentRole === 'student') {
+                                if (msg.command === 'attention') {
+                                    addDebug('👨‍🏫 Учитель привлек внимание');
+                                    showAttention();
+                                }
+                            }
+                            break;
+                            
+                        case 'teacher_status':
+                            // Сервер сообщает, есть ли учитель в комнате
+                            if (currentRole === 'student') {
+                                teacherConnected = msg.connected;
+                                if (!teacherConnected) {
+                                    // Учителя нет, показываем ожидание
+                                    waitingIndicator.style.display = 'flex';
+                                    waitingForTeacher = true;
+                                    addChatMessage('waiting', '👨‍🏫 Ожидание подключения учителя...');
+                                } else {
+                                    // Учитель уже есть, скрываем ожидание
+                                    waitingIndicator.style.display = 'none';
+                                    waitingForTeacher = false;
+                                    // Инициализируем WebRTC и создаем предложение
+                                    if (!peerConnection) {
+                                        initWebRTC('student').then(() => {
+                                            setTimeout(() => createOffer(), 1000);
+                                        });
+                                    }
+                                }
+                            }
+                            break;
+                    }
+                    updateStatus();
+                };
+                
+                socket.onclose = (event) => {
+                    addDebug(`❌ Отключено от сигнального сервера: код ${event.code}`);
+                    
+                    if (currentRole === 'student' && waitingForTeacher && !teacherConnected) {
+                        waitingIndicator.style.display = 'flex';
+                    }
+                    
+                    if (currentRole && reconnectAttempts < MAX_RECONNECT_ATTEMPTS && !isReconnecting) {
+                        reconnectAttempts++;
+                        isReconnecting = true;
+                        addDebug(`🔄 Попытка переподключения ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
+                        setTimeout(() => {
+                            if (currentRole) {
+                                connectToSignalServer(currentRole);
+                            }
+                        }, 2000);
+                    }
+                };
+                
+                socket.onerror = (error) => {
+                    addDebug('❌ Ошибка WebSocket');
+                    updateStatus();
+                };
+                
+            } catch (error) {
+                addDebug('❌ Критическая ошибка WebSocket: ' + error.message);
+                errorControls.style.display = 'flex';
+            }
+        }
+        
+        // Инициализация WebRTC
+        async function initWebRTC(role) {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error('Ваш браузер не поддерживает доступ к камере/микрофону');
+                }
+                
+                addDebug('📷 Запрос доступа к медиаустройствам...');
+                
+                const constraints = {
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                };
+                
+                // Если уже есть локальный поток, используем его
+                if (!localStream) {
+                    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    addDebug('✅ Медиаустройства получены');
+                    
+                    localStream.getVideoTracks().forEach(track => {
+                        track.enabled = cameraEnabled;
+                    });
+                    localStream.getAudioTracks().forEach(track => {
+                        track.enabled = micEnabled;
+                    });
+                    
+                    localVideo.srcObject = localStream;
+                }
+                
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                fileButton.disabled = false;
+                errorControls.style.display = 'none';
+                
+                updateStatus();
+                
+                if (!peerConnection) {
+                    peerConnection = new RTCPeerConnection(ICE_SERVERS);
+                    addDebug('🔌 Создан PeerConnection');
+                    
+                    localStream.getTracks().forEach(track => {
+                        addDebug(`📹 Добавлен трек: ${track.kind}`);
+                        peerConnection.addTrack(track, localStream);
+                    });
+                    
+                    if (role === 'teacher') {
+                        dataChannel = peerConnection.createDataChannel('chat');
+                        setupDataChannel();
+                        addDebug('📨 Создан DataChannel (учитель)');
+                    } else {
+                        peerConnection.ondatachannel = (event) => {
+                            dataChannel = event.channel;
+                            setupDataChannel();
+                            addDebug('📨 Получен DataChannel (ученик)');
+                        };
+                    }
+                    
+                    if (!remoteStream) {
+                        remoteStream = new MediaStream();
+                        remoteVideo.srcObject = remoteStream;
+                    }
+                    
+                    peerConnection.ontrack = (event) => {
+                        addDebug(`📹 Получен удаленный трек: ${event.track.kind}`);
+                        event.streams[0].getTracks().forEach(track => {
+                            remoteStream.addTrack(track);
+                        });
+                        remoteVideoContainer.style.display = 'block';
+                        updateStatus();
+                    };
+                    
+                    peerConnection.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            addDebug('🧊 Отправка ICE candidate');
+                            if (socket && socket.readyState === WebSocket.OPEN) {
+                                socket.send(JSON.stringify({
+                                    type: 'candidate',
+                                    target: currentRole === 'teacher' ? 'student' : 'teacher',
+                                    ice: event.candidate
+                                }));
+                            }
+                        }
+                    };
+                    
+                    peerConnection.onconnectionstatechange = () => {
+                        addDebug(`🔌 Connection state: ${peerConnection.connectionState}`);
+                        if (peerConnection.connectionState === 'connected') {
+                            addChatMessage('system', '✅ Соединение установлено');
+                            sendDeviceState();
+                        } else if (peerConnection.connectionState === 'failed' || 
+                                   peerConnection.connectionState === 'closed') {
+                            if (currentRole === 'teacher') {
+                                addDebug('👨‍🏫 Соединение с учеником потеряно');
+                                remoteVideoContainer.style.display = 'none';
+                            }
+                        }
+                        updateStatus();
+                    };
+                    
+                    peerConnection.oniceconnectionstatechange = () => {
+                        addDebug(`🧊 ICE state: ${peerConnection.iceConnectionState}`);
+                        updateStatus();
+                    };
+                }
+                
+            } catch (error) {
+                addDebug('❌ Ошибка доступа к медиа: ' + error.message);
+                
+                let errorMessage = '❌ Не удалось получить доступ к камере/микрофону.\n';
+                
+                if (error.name === 'NotAllowedError') {
+                    errorMessage += 'Доступ запрещен. Разрешите в настройках браузера.';
+                } else if (error.name === 'NotFoundError') {
+                    errorMessage += 'Устройства не найдены.';
+                } else if (error.name === 'NotReadableError') {
+                    errorMessage += 'Устройство занято.';
+                } else {
+                    errorMessage += error.message;
+                }
+                
+                alert(errorMessage);
+                errorControls.style.display = 'flex';
+                updateStatus();
+            }
+        }
+        
+        // Отправка состояния устройств
+        function sendDeviceState() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'remote_state',
+                    target: currentRole === 'teacher' ? 'student' : 'teacher',
+                    camera: cameraEnabled,
+                    mic: micEnabled
+                }));
+                addDebug('📤 Отправлено состояние устройств');
+            }
+        }
+        
+        // Показать внимание ученику
+        function showAttention() {
+            // Разворачиваем чат, если он свернут
+            if (chatSection.classList.contains('collapsed')) {
+                toggleChat();
+            }
+            
+            // Добавляем сообщение в чат
+            addChatMessage('attention', '⚠️ ВНИМАНИЕ от учителя! ⚠️');
+            
+            // Показываем баннер
+            attentionBanner.classList.add('show');
+            
+            setTimeout(() => {
+                attentionBanner.classList.remove('show');
+            }, 3000);
+        }
+        
+        // Отправить внимание ученику (учитель)
+        function sendAttention() {
+            if (currentRole === 'teacher') {
+                addDebug('👨‍🏫 Отправка сигнала внимания ученику');
+                
+                // Отправляем через WebSocket
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'teacher_command',
+                        target: 'student',
+                        command: 'attention'
+                    }));
+                    
+                    addChatMessage('system', '⚠️ Сигнал внимания отправлен ученику');
+                }
+                
+                // Также отправляем через DataChannel, если он открыт
+                if (dataChannel && dataChannel.readyState === 'open') {
+                    dataChannel.send(JSON.stringify({
+                        type: 'teacher_command',
+                        command: 'attention'
+                    }));
+                }
+            }
+        }
+        
+        // Повторная попытка подключения
+        async function retryMediaAccess() {
+            addDebug('🔄 Повторная попытка подключения...');
+            errorControls.style.display = 'none';
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            await initWebRTC(currentRole);
+        }
+        
+        // Настройка data channel
+        function setupDataChannel() {
+            dataChannel.onopen = () => {
+                addDebug('📨 Data channel opened');
+            };
+            
+            dataChannel.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                addDebug(`📨 Получено по DataChannel: ${data.type}`);
+                
+                if (data.type === 'chat') {
+                    addChatMessage(currentRole === 'teacher' ? 'student' : 'teacher', data.message);
+                } else if (data.type === 'file') {
+                    receiveFile(data.file);
+                } else if (data.type === 'device_state') {
+                    if (data.camera !== undefined) {
+                        remoteCameraEnabled = data.camera;
+                        const status = data.camera ? 'включил(а) камеру' : 'выключил(а) камеру';
+                        addChatMessage(currentRole === 'teacher' ? 'student' : 'teacher', status);
+                    }
+                    if (data.mic !== undefined) {
+                        remoteMicEnabled = data.mic;
+                        const status = data.mic ? 'включил(а) микрофон' : 'выключил(а) микрофон';
+                        addChatMessage(currentRole === 'teacher' ? 'student' : 'teacher', status);
+                    }
+                    updateStatus();
+                } else if (data.type === 'teacher_command' && data.command === 'attention') {
+                    // Получение сигнала внимания через DataChannel
+                    if (currentRole === 'student') {
+                        showAttention();
+                    }
+                }
+            };
+            
+            dataChannel.onclose = () => {
+                addDebug('📨 Data channel closed');
+            };
+        }
+        
+        // Создание offer
+        async function createOffer() {
+            try {
+                addDebug('📞 Создание SDP offer');
+                const offer = await peerConnection.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+                await peerConnection.setLocalDescription(offer);
+                addDebug('✅ Local description установлен');
+                
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'offer',
+                        target: currentRole === 'teacher' ? 'student' : 'teacher',
+                        sdp: offer.sdp
+                    }));
+                    addDebug('📤 Offer отправлен');
+                }
+            } catch (error) {
+                addDebug('❌ Ошибка создания offer: ' + error.message);
+            }
+        }
+        
+        // Обработка offer
+        async function handleOffer(msg) {
+            try {
+                addDebug('📞 Установка remote description (offer)');
+                await peerConnection.setRemoteDescription({
+                    type: 'offer',
+                    sdp: msg.sdp
+                });
+                
+                addDebug('📞 Создание answer');
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                addDebug('✅ Local description установлен (answer)');
+                
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'answer',
+                        target: currentRole === 'teacher' ? 'student' : 'teacher',
+                        sdp: answer.sdp
+                    }));
+                    addDebug('📤 Answer отправлен');
+                }
+            } catch (error) {
+                addDebug('❌ Ошибка обработки offer: ' + error.message);
+            }
+        }
+        
+        // Обработка answer
+        async function handleAnswer(msg) {
+            try {
+                addDebug('📞 Установка remote description (answer)');
+                await peerConnection.setRemoteDescription({
+                    type: 'answer',
+                    sdp: msg.sdp
+                });
+                addDebug('✅ Remote description установлен');
+            } catch (error) {
+                addDebug('❌ Ошибка обработки answer: ' + error.message);
+            }
+        }
+        
+        // Обработка ICE candidate
+        async function handleCandidate(msg) {
+            try {
+                addDebug('🧊 Добавление ICE candidate');
+                await peerConnection.addIceCandidate(msg.ice);
+                addDebug('✅ ICE candidate добавлен');
+            } catch (error) {
+                addDebug('❌ Ошибка добавления ICE candidate: ' + error.message);
+            }
+        }
+        
+        // Управление камерой
+        function toggleCamera() {
+            if (localStream) {
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    cameraEnabled = !cameraEnabled;
+                    videoTrack.enabled = cameraEnabled;
+                    addDebug(`📷 Камера ${cameraEnabled ? 'включена' : 'выключена'}`);
+                    
+                    const status = cameraEnabled ? 'включил(а) камеру' : 'выключил(а) камеру';
+                    addChatMessage(currentRole, status);
+                    
+                    updateStatus();
+                    createDeviceButtons(); // Обновляем кнопки с индикаторами
+                    
+                    if (dataChannel && dataChannel.readyState === 'open') {
+                        dataChannel.send(JSON.stringify({
+                            type: 'device_state',
+                            camera: cameraEnabled,
+                            mic: micEnabled
+                        }));
+                    }
+                    sendDeviceState();
+                }
+            }
+        }
+        
+        // Управление микрофоном
+        function toggleMicrophone() {
+            if (localStream) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    micEnabled = !micEnabled;
+                    audioTrack.enabled = micEnabled;
+                    addDebug(`🎤 Микрофон ${micEnabled ? 'включен' : 'выключен'}`);
+                    
+                    const status = micEnabled ? 'включил(а) микрофон' : 'выключил(а) микрофон';
+                    addChatMessage(currentRole, status);
+                    
+                    updateStatus();
+                    createDeviceButtons(); // Обновляем кнопки с индикаторами
+                    
+                    if (dataChannel && dataChannel.readyState === 'open') {
+                        dataChannel.send(JSON.stringify({
+                            type: 'device_state',
+                            camera: cameraEnabled,
+                            mic: micEnabled
+                        }));
+                    }
+                    sendDeviceState();
+                }
+            }
+        }
+        
+        // Шеринг экрана
+        async function toggleScreenShare() {
+            if (screenStream) {
+                screenStream.getTracks().forEach(track => track.stop());
+                screenStream = null;
+                
+                if (localStream) {
+                    localVideo.srcObject = localStream;
+                    
+                    const senders = peerConnection.getSenders();
+                    localStream.getTracks().forEach(track => {
+                        const sender = senders.find(s => s.track && s.track.kind === track.kind);
+                        if (sender) {
+                            sender.replaceTrack(track);
+                        }
+                    });
+                }
+                addDebug('🖥️ Остановлен шаринг экрана');
+            } else {
+                try {
+                    const displayMediaOptions = {
+                        video: {
+                            cursor: "always"
+                        },
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    };
+                    
+                    screenStream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+                    
+                    const videoTrack = screenStream.getVideoTracks()[0];
+                    const audioTrack = screenStream.getAudioTracks()[0];
+                    
+                    const senders = peerConnection.getSenders();
+                    
+                    const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                    if (videoSender) {
+                        videoSender.replaceTrack(videoTrack);
+                    }
+                    
+                    if (audioTrack) {
+                        const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+                        if (audioSender) {
+                            audioSender.replaceTrack(audioTrack);
+                        } else {
+                            peerConnection.addTrack(audioTrack, screenStream);
+                        }
+                    }
+                    
+                    localVideo.srcObject = screenStream;
+                    
+                    videoTrack.onended = () => {
+                        toggleScreenShare();
+                    };
+                    
+                    addDebug('🖥️ Начат шаринг экрана');
+                    
+                } catch (error) {
+                    addDebug('❌ Ошибка шаринга экрана: ' + error.message);
+                    
+                    if (localStream) {
+                        localVideo.srcObject = localStream;
+                    }
+                }
+            }
+        }
+        
+        // Отправка сообщения
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            addChatMessage(currentRole, message);
+            
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(JSON.stringify({
+                    type: 'chat',
+                    message: message
+                }));
+                addDebug('📤 Сообщение отправлено через DataChannel');
+            } else if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'chat',
+                    target: currentRole === 'teacher' ? 'student' : 'teacher',
+                    message: message
+                }));
+                addDebug('📤 Сообщение отправлено через SignalServer');
+            }
+            
+            messageInput.value = '';
+        }
+        
+        // Добавление сообщения в чат
+        function addChatMessage(role, message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            
+            let roleText = '';
+            if (role === 'teacher') roleText = '👨‍🏫 Учитель: ';
+            else if (role === 'student') roleText = '🧑‍🎓 Ученик: ';
+            else if (role === 'system') roleText = 'ℹ️ ';
+            else if (role === 'waiting') roleText = '⏳ ';
+            else if (role === 'attention') roleText = '';
+            
+            messageDiv.textContent = roleText + message;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        // Отправка файла
+        function sendFile(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            addDebug('📎 Отправка файла: ' + file.name);
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const fileData = {
+                    name: file.name,
+                    size: file.size,
+                    type: file.type,
+                    data: e.target.result.split(',')[1]
+                };
+                
+                if (dataChannel && dataChannel.readyState === 'open') {
+                    dataChannel.send(JSON.stringify({
+                        type: 'file',
+                        file: fileData
+                    }));
+                    addDebug('📎 Файл отправлен через DataChannel');
+                } else if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'file',
+                        target: currentRole === 'teacher' ? 'student' : 'teacher',
+                        file: fileData
+                    }));
+                    addDebug('📎 Файл отправлен через SignalServer');
+                }
+                
+                displayFile(fileData, true);
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        // Получение файла
+        function receiveFile(fileData) {
+            addDebug('📎 Получен файл: ' + fileData.name);
+            displayFile(fileData, false);
+            
+            const link = document.createElement('a');
+            link.href = 'data:' + fileData.type + ';base64,' + fileData.data;
+            link.download = fileData.name;
+            link.textContent = `📥 Скачать ${fileData.name} (${formatFileSize(fileData.size)})`;
+            link.style.display = 'block';
+            link.style.padding = '8px';
+            link.style.background = '#e3f2fd';
+            link.style.borderRadius = '8px';
+            link.style.marginBottom = '8px';
+            link.style.textDecoration = 'none';
+            link.style.color = '#1976d2';
+            link.style.fontWeight = '500';
+            
+            const fileList = document.getElementById('fileList');
+            fileList.appendChild(link);
+        }
+        
+        // Отображение файла
+        function displayFile(fileData, isOutgoing) {
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'file-item';
+            fileDiv.innerHTML = `
+                <span>${isOutgoing ? '📤' : '📥'} ${fileData.name}</span>
+                <span style="color: #666; font-size: 12px;">${formatFileSize(fileData.size)}</span>
+            `;
+            document.getElementById('fileList').appendChild(fileDiv);
+        }
+        
+        // Форматирование размера файла
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+        
+        // Обновление статусов
+        function updateStatus() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                wsIndicator.className = 'status-indicator status-connected';
+                wsStatus.textContent = 'подключен';
+            } else {
+                wsIndicator.className = 'status-indicator status-disconnected';
+                wsStatus.textContent = 'отключен';
+            }
+            
+            if (peerConnection) {
+                const state = peerConnection.connectionState;
+                p2pStatus.textContent = state === 'connected' ? 'активно' : state;
+                
+                if (state === 'connected') {
+                    p2pIndicator.className = 'status-indicator status-connected';
+                } else if (state === 'connecting') {
+                    p2pIndicator.className = 'status-indicator status-warning';
+                } else {
+                    p2pIndicator.className = 'status-indicator status-disconnected';
+                }
+            } else {
+                p2pIndicator.className = 'status-indicator status-disconnected';
+                p2pStatus.textContent = 'отключено';
+            }
+            
+            if (localStream && localStream.active) {
+                mediaIndicator.className = 'status-indicator status-connected';
+                mediaStatus.textContent = 'активны';
+            } else {
+                mediaIndicator.className = 'status-indicator status-disconnected';
+                mediaStatus.textContent = 'не активны';
+            }
+            
+            if (cameraEnabled) {
+                cameraStatus.className = 'status-led on';
+            } else {
+                cameraStatus.className = 'status-led off';
+            }
+            
+            if (micEnabled) {
+                micStatus.className = 'status-led on';
+            } else {
+                micStatus.className = 'status-led off';
+            }
+            
+            if (remoteCameraEnabled) {
+                remoteCameraStatus.className = 'status-led on';
+            } else {
+                remoteCameraStatus.className = 'status-led off';
+            }
+            
+            if (remoteMicEnabled) {
+                remoteMicStatus.className = 'status-led on';
+            } else {
+                remoteMicStatus.className = 'status-led off';
+            }
+            
+            // Обновляем индикаторы на кнопках
+            const cameraIndicator = document.getElementById('cameraIndicator');
+            const micIndicator = document.getElementById('micIndicator');
+            const studentCameraIndicator = document.getElementById('studentCameraIndicator');
+            const studentMicIndicator = document.getElementById('studentMicIndicator');
+            
+            if (cameraIndicator) {
+                cameraIndicator.className = `btn-status ${cameraEnabled ? 'status-connected' : 'status-disconnected'}`;
+            }
+            if (micIndicator) {
+                micIndicator.className = `btn-status ${micEnabled ? 'status-connected' : 'status-disconnected'}`;
+            }
+            if (studentCameraIndicator) {
+                studentCameraIndicator.className = `btn-status ${cameraEnabled ? 'status-connected' : 'status-disconnected'}`;
+            }
+            if (studentMicIndicator) {
+                studentMicIndicator.className = `btn-status ${micEnabled ? 'status-connected' : 'status-disconnected'}`;
+            }
+        }
+        
+        // Периодическое обновление статуса
+        setInterval(updateStatus, 500);
+        
+        // Проверка поддержки при загрузке
+        document.addEventListener('DOMContentLoaded', () => {
+            addDebug('📄 Страница загружена');
+            
+            if (!window.RTCPeerConnection) {
+                alert('Ваш браузер не поддерживает WebRTC.');
+                addDebug('❌ WebRTC не поддерживается');
+            } else {
+                addDebug('✅ WebRTC поддерживается');
+            }
+            
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Ваш браузер не поддерживает доступ к камере/микрофону.');
+                addDebug('❌ MediaDevices не поддерживается');
+            } else {
+                addDebug('✅ MediaDevices поддерживается');
+            }
+        });
+    </script>
+</body>
+</html>
