@@ -142,3 +142,95 @@ p2p-learning/
 ---
 
 **P2P Обучение** — сделано с ❤️ для удобного онлайн-образования
+
+
+
+### 📦 Инструкция по установке P2P Learning на Debian 13
+
+#### 1. Подготовка системы
+Выполните эти команды для установки необходимых пакетов:
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git golang openssl
+```
+
+#### 2. Клонирование репозитория
+Скопируйте проект с GitHub:
+```bash
+git clone https://github.com/gambit295/webrtc_p2p.git
+cd webrtc_p2p
+```
+
+#### 3. Генерация SSL сертификатов (обязательно для HTTPS)
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:4096 -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes -subj "/CN=localhost"
+```
+
+#### 4. Запуск сервера
+Просто запустите Go-файл (зависимости подгрузятся автоматически):
+```bash
+go run main.go
+```
+Вы должны увидеть:
+```
+Signal server starting on https://localhost:8443
+Используйте https://<IP-адрес-сервера>:8443 для доступа с других устройств
+```
+
+#### 5. Настройка автозапуска (опционально)
+Создайте systemd сервис для постоянной работы:
+```bash
+# Создайте сервисный файл
+sudo nano /etc/systemd/system/p2p-learning.service
+```
+Вставьте в него (заменив `your_username` на ваше имя пользователя):
+```ini
+[Unit]
+Description=P2P Learning Server
+After=network.target
+
+[Service]
+Type=simple
+User=your_username
+WorkingDirectory=/home/your_username/webrtc_p2p
+ExecStart=/usr/bin/go run /home/your_username/webrtc_p2p/main.go
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+Затем активируйте и запустите:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable p2p-learning.service
+sudo systemctl start p2p-learning.service
+sudo systemctl status p2p-learning.service
+```
+
+#### 6. Настройка фаервола
+Разрешите трафик на порт 8443:
+```bash
+sudo ufw allow 8443/tcp
+```
+
+#### 7. Доступ к приложению
+Откройте браузер и перейдите по адресу:
+*   **На сервере:** `https://localhost:8443`
+*   **С другого устройства в сети:** `https://<IP-адрес-вашего-сервера>:8443`
+
+При использовании самоподписанного сертификата браузер покажет предупреждение о безопасности — нажмите «Дополнительно» и «Перейти на сайт».
+
+### 🎯 Проверка работоспособности
+1.  Откройте приложение в двух разных браузерах или на двух устройствах.
+2.  В первом нажмите **«👨‍🏫 Я Учитель»**, во втором — **«🧑‍🎓 Я Ученик»**.
+3.  Разрешите доступ к камере и микрофону.
+4.  Наслаждайтесь сессией! Все статусы и отладка будут отображаться на панели.
+
+### 🔧 Возможные проблемы и их решение
+*   **Ошибка "port already in use"**: Проверьте, не запущен ли другой процесс на порту 8443: `sudo netstat -tulpn | grep 8443`.
+*   **Браузер не видит камеру/микрофон**: Проверьте настройки сайта (значок замка в адресной строке) и разрешите доступ к устройствам.
+*   **Если что-то пошло не так**: В панели «Отладка» в интерфейсе приложения есть подробный лог, который поможет диагностировать проблему.
+
+Готово! 🎉 Ваше P2P-приложение для обучения работает. Учитель и ученик теперь могут общаться напрямую.
